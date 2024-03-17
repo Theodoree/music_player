@@ -1,10 +1,13 @@
 package model
 
 import (
-	"fyne.io/fyne/v2/data/binding"
+	"fmt"
 	"gorm.io/gorm"
 	"math"
 	"strings"
+	"time"
+	
+	"fyne.io/fyne/v2/data/binding"
 )
 
 type MusicType int
@@ -19,7 +22,7 @@ const (
 )
 
 func InitModel(db *gorm.DB) {
-	err := db.AutoMigrate(&MusicTable{}, &Music{})
+	err := db.AutoMigrate(&MusicTable{}, &Music{}, &Picture{})
 	if err != nil {
 		panic(err)
 	}
@@ -42,32 +45,37 @@ func IsMusicType(name string) (MusicType, bool) {
 type MusicTable struct {
 	Name string `gorm:"name"`
 	gorm.Model
-}
-
-// 该方法用于实现binding.DataItem接口
-func (t MusicTable) AddListener(listener binding.DataListener) {
-
-}
-func (t MusicTable) RemoveListener(listener binding.DataListener) {
-
+	dummyDataListener `gorm:"-"`
 }
 
 type Music struct {
-	MusicTableID uint      `gorm:"music_table_id,index"`
-	Name         string    `gorm:"name,unique"`
-	Singer       string    `gorm:"writer"`
-	Album        string    `gorm:"Album"`
-	Length       string    `gorm:"length"`
-	Pic          string    `gorm:"pic"`
-	Path         string    `gorm:"path"`
-	Type         MusicType `gorm:"type"`
+	MusicTableID uint          `gorm:"music_table_id,index:music_table_id"`
+	Name         string        `gorm:"name"`
+	Singer       string        `gorm:"writer"`
+	Album        string        `gorm:"Album"`
+	Length       time.Duration `gorm:"length"`
+	Path         string        `gorm:"path"`
+	Type         MusicType     `gorm:"type"`
+	Lyric        string        `gorm:"lyric"`
+	Union        string        `gorm:"index:idx_name,unique"`
+	
+	dummyDataListener `gorm:"-"`
 	gorm.Model
 }
 
-// 该方法用于实现binding.DataItem接口
-func (t Music) AddListener(listener binding.DataListener) {
+func (m *Music) SetUnion() {
+	m.Union = fmt.Sprintf("%d-%s", m.MusicTableID, m.Path)
+}
+
+type Picture struct {
+	Path              string `json:"path"`
+	dummyDataListener `gorm:"-"`
+	gorm.Model
+}
+
+type dummyDataListener struct{}
+
+func (t dummyDataListener) AddListener(listener binding.DataListener) {
 
 }
-func (t Music) RemoveListener(listener binding.DataListener) {
-
-}
+func (t dummyDataListener) RemoveListener(listener binding.DataListener) {}

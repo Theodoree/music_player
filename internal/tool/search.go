@@ -1,9 +1,12 @@
 package tool
 
 import (
-	"encoding/json"
+	"github.com/faiface/beep/flac"
+	"github.com/faiface/beep/mp3"
+	"k8s.io/klog"
 	"os"
 	"path/filepath"
+	"time"
 	
 	"github.com/Theodoree/music_player/internal/model"
 	"github.com/dhowden/tag"
@@ -41,33 +44,62 @@ func SearchMusicFileByPath(path string) []model.Music {
 		ms.Name = entry.Name()
 		ms.Type = t
 		ms.Path = path
-		getMetadata(path, &ms)
+		if err := getMetadata(path, &ms); err != nil {
+			klog.Error(err)
+			return
+		}
 		items = append(items, ms)
 	}
 	recursiveSearchDirectory(path, consumer)
 	return items
 }
 
-func getMetadata(fileName string, music *model.Music) {
+func getMetadata(fileName string, music *model.Music) error {
 	file, err := os.Open(fileName)
 	if err != nil {
-		return
+		return err
 	}
 	m, err := tag.ReadFrom(file)
 	if err != nil {
-		return
+		klog.Error(err)
+		return nil
 	}
 	
-	music.Name = m.Title()
-	music.Singer = m.Artist()
+	if m.Title() != "" {
+		music.Name = m.Title()
+	}
 	if music.Singer == "" {
 		music.Singer = m.AlbumArtist()
 	}
 	music.Album = m.Album()
-	pic := m.Picture()
-	if pic != nil {
-		buf, _ := json.Marshal(pic)
-		music.Pic = string(buf)
+	//pic := m.Picture()
+	//if pic != nil {
+	//	buf, _ := json.Marshal(pic)
+	//	music.Pic = string(buf)
+	//}
+	
+	switch m.FileType() {
+	case tag.MP3:
+		_, _ = file.Seek(0, 0)
+		streamer, format, err := mp3.Decode(file)
+		if err != nil {
+			klog.Error(err)
+			_, _, err = flac.Decode(file)
+			klog.Error(err)
+			return err
+		}
+		format.SampleRate.D(streamer.Len()).Round(time.Second)
+		music.Length = format.SampleRate.D(streamer.Len()).Round(time.Second)
+	case tag.FLAC:
+		_, _ = file.Seek(0, 0)
+		streamer, format, err := flac.Decode(file)
+		if err != nil {
+			klog.Error(err)
+			return err
+		}
+		format.SampleRate.D(streamer.Len()).Round(time.Second)
+		music.Length = format.SampleRate.D(streamer.Len()).Round(time.Second)
 	}
 	
+	return nil
 }

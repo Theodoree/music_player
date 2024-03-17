@@ -3,23 +3,38 @@ package db
 // Description: This file contains the factory functions for creating new instances of gorm.DB.
 // It also contains the factory functions for creating new instances of the cache.
 import (
+	"k8s.io/klog"
 	"os"
 	"path/filepath"
 	"sync"
 	
-	"github.com/Theodoree/music_player/internal"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
+type CacheInterface interface {
+	Load(key string) (interface{}, bool)
+	Store(key string, value interface{}) bool
+	Delete(key string)
+}
+
+// Factory is a function that returns a new instance of gorm.DB
+type Factory func() *gorm.DB
+
+// CacheFactory is a function that returns a new instance of cacheInterface
+type CacheFactory func() CacheInterface
+
 // SqliteFactory is a factory function that returns a new instance of gorm.DB
-func SqliteFactory(path string) internal.Factory {
+func SqliteFactory(path string) Factory {
 	// If the path is empty, use the path of the current executable
 	if path == "" {
 		binaryPath, _ := os.Executable()
 		binaryDir := filepath.Dir(binaryPath)
 		path = filepath.Join(binaryDir, "storage.db")
+	} else {
+		path = filepath.Join(path, "storage.db")
 	}
+	klog.Info(path)
 	return func() *gorm.DB {
 		db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 		if err != nil {
@@ -29,8 +44,8 @@ func SqliteFactory(path string) internal.Factory {
 	}
 }
 
-func MemoryCacheFactory() internal.CacheFactory {
-	return func() internal.CacheInterface {
+func MemoryCacheFactory() CacheFactory {
+	return func() CacheInterface {
 		return &memoryCache{}
 	}
 }

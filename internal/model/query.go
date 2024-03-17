@@ -3,10 +3,15 @@ package model
 import (
 	"errors"
 	"fmt"
-	"github.com/Theodoree/music_player/internal"
 	
 	"gorm.io/gorm"
 )
+
+type cacheInterface interface {
+	Load(key string) (interface{}, bool)
+	Store(key string, value interface{}) bool
+	Delete(key string)
+}
 
 var (
 	NotFoundPrimaryKey = errors.New("primary key not found")
@@ -71,16 +76,16 @@ func (q MusicTableQuery) AddBatch(db *gorm.DB, items []MusicTable) error {
 func (q MusicTableQuery) CacheKey(id uint) string {
 	return fmt.Sprintf(musicListCacheKey, id)
 }
-func (q MusicTableQuery) Delete(db *gorm.DB, cacheService internal.CacheInterface, item MusicTable) error {
+func (q MusicTableQuery) Delete(db *gorm.DB, cacheService cacheInterface, item MusicTable) error {
 	cacheService.Delete(q.CacheKey(item.ID))
 	return q.basicQuery.delete(db, item.ID)
 }
-func (q MusicTableQuery) Update(db *gorm.DB, cacheService internal.CacheInterface, item MusicTable) error {
+func (q MusicTableQuery) Update(db *gorm.DB, cacheService cacheInterface, item MusicTable) error {
 	cacheService.Delete(q.CacheKey(item.ID))
 	return q.basicQuery.update(db, item, item.ID)
 	
 }
-func (q MusicTableQuery) GetByID(db *gorm.DB, cacheService internal.CacheInterface, id uint) (MusicTable, error) {
+func (q MusicTableQuery) GetByID(db *gorm.DB, cacheService cacheInterface, id uint) (MusicTable, error) {
 	value, _ := cacheService.Load(q.CacheKey(id))
 	if value != nil {
 		return value.(MusicTable), nil
@@ -99,19 +104,23 @@ type MusicQuery struct {
 }
 
 func (q MusicQuery) Add(db *gorm.DB, item Music) error {
+	item.SetUnion()
 	return q.basicQuery.add(db, item)
 }
 func (q MusicQuery) AddBatch(db *gorm.DB, items []Music) error {
+	for i := 0; i < len(items); i++ {
+		items[i].SetUnion()
+	}
 	return q.basicQuery.addBatch(db, items)
 }
 func (q MusicQuery) CacheKey(id uint) string {
 	return fmt.Sprintf(musicItemCacheKey, id)
 }
-func (q MusicQuery) Delete(db *gorm.DB, cacheService internal.CacheInterface, item Music) error {
+func (q MusicQuery) Delete(db *gorm.DB, cacheService cacheInterface, item Music) error {
 	cacheService.Delete(q.CacheKey(item.ID))
 	return q.basicQuery.delete(db, item.ID)
 }
-func (q MusicQuery) GetByID(db *gorm.DB, cacheService internal.CacheInterface, id uint) (Music, error) {
+func (q MusicQuery) GetByID(db *gorm.DB, cacheService cacheInterface, id uint) (Music, error) {
 	value, _ := cacheService.Load(q.CacheKey(id))
 	if value != nil {
 		return value.(Music), nil
@@ -124,11 +133,13 @@ func (q MusicQuery) GetByID(db *gorm.DB, cacheService internal.CacheInterface, i
 	cacheService.Store(q.CacheKey(id), m)
 	return m, nil
 }
-
-func (q MusicQuery) DeleteByMusicListID(db *gorm.DB, musicTableTag uint) {
-	db.Delete(&q.empty, "music_table_id = ?", musicTableTag)
+func (q MusicQuery) DeleteByMusicListID(db *gorm.DB, musicTableTag uint) error {
+	return db.Delete(&q.empty, "music_table_id = ?", musicTableTag).Error
 }
 func (q MusicQuery) GetByMusicListID(db *gorm.DB, musicTableTag uint) ([]Music, error) {
 	var items []Music
 	return items, db.Find(&items, "music_table_id = ?", musicTableTag).Error
+}
+func (q MusicQuery) Update(db *gorm.DB, item Music) error {
+	return q.basicQuery.update(db, item, item.ID)
 }

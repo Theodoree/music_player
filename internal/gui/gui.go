@@ -4,14 +4,13 @@ import (
 	"context"
 	"embed"
 	"errors"
+	
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/Theodoree/music_player/internal/model"
-	"github.com/Theodoree/music_player/internal/module"
+	"github.com/Theodoree/music_player/internal/mp"
 )
 
 type _theme struct {
@@ -24,156 +23,64 @@ func (t _theme) Font(fyne.TextStyle) fyne.Resource {
 }
 
 type gui struct {
-	w          fyne.Window
-	op         module.MusicPlayerOperation
-	controller *controller
+	ctx context.Context
+	//mp  mp.MusicPlayer
+	
+	//musicListView  *musicListView
+	//musicTableView *musicTableView
+	//controller     *controller
 }
 
 func Run(a fyne.App, res *embed.FS) {
 	w := a.NewWindow("musicplayer")
-	buf, _ := res.ReadFile("resource/font/simkai.ttf")
+	buf, err := res.ReadFile("resource/font/simkai.ttf")
 	a.Settings().SetTheme(_theme{Theme: theme.DefaultTheme(), font: fyne.NewStaticResource("simkai.ttf", buf)})
 	var gui gui
-	gui.w = w
-	gui.op = module.NewController(context.Background(), func(str string) {
+	gui.ctx = context.Background()
+	musicPlayer, err := mp.NewMusicPlayer(gui.ctx, func(str string) {
 		dialog.ShowError(errors.New(str), w)
 	})
-	gui.w.Resize(fyne.NewSize(1024, 768))
-	gui.w.SetMaster()
-	gui.View()
-	gui.w.ShowAndRun()
+	if err != nil {
+		panic(err)
+	}
+	w.Resize(fyne.NewSize(1024, 768))
+	w.SetMaster()
+	gui.InitMenu(w, musicPlayer)
+	gui.View(w, musicPlayer)
+	w.ShowAndRun()
 }
 
-func (gui *gui) View() {
-	w := gui.w
+func (app *gui) InitMenu(window fyne.Window, musicPlayer mp.MusicPlayer) {
+	// 添加子菜单项到“File”菜单下
+	pauseMenuItem := fyne.NewMenuItem("暂停", musicPlayer.Play)
+	prevMenuItem := fyne.NewMenuItem("上一首", musicPlayer.Prev)
+	nextMenuItem := fyne.NewMenuItem("下一首", musicPlayer.Next)
+	// 创建主菜单并添加菜单项
+	mainMenu := fyne.NewMainMenu(
+		fyne.NewMenu("播放控制", pauseMenuItem, prevMenuItem, nextMenuItem),
+	)
+	// 设置窗口的菜单栏
+	window.SetMainMenu(mainMenu)
+}
+
+func (app *gui) View(window fyne.Window, musicPlayer mp.MusicPlayer) {
 	
-	label := widget.NewLabel("本地歌单")
-	musicTable := container.NewBorder(label, nil, nil, widget.NewSeparator(), newMusicTable(gui.op).view())
-	controller := newController(gui.op)
-	musicToolBar := newMusicToolBar(gui.op)
-	musicListView := newMusicList(gui.op)
+	entry := newSelectEntry(musicPlayer)
+	// 表格列表视图
+	musicTableView := newMusicTableView(musicPlayer, window, entry)
+	// 音乐列表视图
+	musicListView := newMusicListView(musicPlayer, window, entry)
+	// 歌词视图
+	lyrics := newLyricsView(musicPlayer, window)
+	// 控制器视图(歌手、音乐名、播放进度条、音量、播放控制按钮)
+	controller := newController()
 	
-	b1 := container.NewBorder(musicToolBar.view(w), nil, nil, nil, musicListView.view(func() {
-		if controller.menu.play.Hidden {
-			return
-		}
-		controller.menu.play.Hide()
-		controller.menu.pause.Show()
-		
-	}))
-	b2 := container.NewBorder(nil, nil, musicTable, nil, b1)
+	// 组装容器
+	// left: 表格列表视图  middle: 音乐列表视图 right: 歌词视图
+	topContainer := container.NewBorder(nil, nil, musicTableView.view(musicListView.SwapTable), lyrics.view(), musicListView.view())
+	bottomContainer := container.NewBorder(widget.NewSeparator(), nil, nil, nil, controller.View(musicPlayer))
+	view := container.NewBorder(nil, bottomContainer, nil, nil, topContainer)
 	
-	controllerBox := container.NewBorder(widget.NewSeparator(), nil, nil, nil, controller.View())
-	w.SetContent(container.NewBorder(nil, controllerBox, nil, nil, b2))
-	w.Show()
-}
-
-type musicTable struct {
-	op module.MusicPlayerOperation
-}
-
-func newMusicTable(op module.MusicPlayerOperation) *musicTable {
-	return &musicTable{op: op}
-}
-
-func (t musicTable) view() fyne.CanvasObject {
-	ml := widget.NewListWithData(
-		t.op.GetMusicTableList(),
-		func() fyne.CanvasObject {
-			bt := widget.NewButton("", func() {})
-			return bt
-		},
-		func(_item binding.DataItem, object fyne.CanvasObject) {
-			o := object.(*widget.Button)
-			item := _item.(model.MusicTable)
-			o.Text = item.Name
-			o.OnTapped = func() {
-				t.op.SelectTable(item.ID)
-			}
-			o.Refresh()
-		})
-	return ml
-}
-
-type musicList struct {
-	op module.MusicPlayerOperation
-}
-
-func newMusicList(op module.MusicPlayerOperation) *musicList {
-	return &musicList{op: op}
-}
-
-func (t *musicList) view(play func()) fyne.CanvasObject {
-	ml := widget.NewListWithData(
-		t.op.GetMusicList(),
-		func() fyne.CanvasObject {
-			titleLabel := widget.NewLabelWithStyle("歌曲名", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-			titleLabel.Truncation = fyne.TextTruncateEllipsis
-			singerLabel := widget.NewLabel("歌手")
-			singerLabel.Truncation = fyne.TextTruncateEllipsis
-			album := widget.NewLabel("专辑")
-			album.Truncation = fyne.TextTruncateEllipsis
-			length := widget.NewLabel("长度")
-			length.Truncation = fyne.TextTruncateEllipsis
-			button := widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {})
-			return container.NewGridWithColumns(5, titleLabel, singerLabel, album, length, button)
-		},
-		func(_item binding.DataItem, object fyne.CanvasObject) {
-			o := object.(*fyne.Container)
-			item := _item.(model.Music)
-			
-			gridColumns := o
-			title := gridColumns.Objects[0].(*widget.Label)
-			singerLabel := gridColumns.Objects[1].(*widget.Label)
-			album := gridColumns.Objects[2].(*widget.Label)
-			length := gridColumns.Objects[3].(*widget.Label)
-			button := gridColumns.Objects[4].(*widget.Button)
-			button.OnTapped = func() {
-				t.op.SelectMusic(item.ID)
-				play()
-				
-			}
-			title.Text = item.Name
-			singerLabel.Text = item.Singer
-			album.Text = item.Album
-			length.Text = item.Length
-			
-			title.Refresh()
-			singerLabel.Refresh()
-			album.Refresh()
-			length.Refresh()
-		})
-	
-	return ml
-}
-
-type musicToolBar struct {
-	op module.MusicPlayerOperation
-}
-
-func newMusicToolBar(op module.MusicPlayerOperation) *musicToolBar {
-	return &musicToolBar{op: op}
-}
-func (t *musicToolBar) view(w fyne.Window) fyne.CanvasObject {
-	importButton := widget.NewButton("导入", func() {
-		dialog.ShowFolderOpen(func(reader fyne.ListableURI, err error) {
-			if err != nil {
-				dialog.ShowError(err, w)
-				return
-			}
-			if reader == nil {
-				return
-			}
-			t.op.SaveToTable(reader.Path())
-		}, w)
-	})
-	
-	titleLabel := widget.NewLabelWithStyle("歌曲名", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	singerLabel := widget.NewLabel("歌手")
-	albumLabel := widget.NewLabel("专辑")
-	playLable := widget.NewLabelWithStyle("长度", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	buttonLable := widget.NewLabelWithStyle("播放", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	
-	t2 := container.NewGridWithColumns(5, titleLabel, singerLabel, albumLabel, playLable, buttonLable)
-	return container.NewBorder(importButton, nil, nil, nil, t2)
+	window.SetContent(view)
+	window.Show()
 }

@@ -24,3 +24,10 @@ go.work
 
 #goland
 .idea/
+
+storage.db
+
+
+
+cache
+save
